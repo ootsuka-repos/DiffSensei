@@ -1,4 +1,4 @@
-# DiffSensei: Bridging Multi-Modal LLMs and Diffusion Models for Customized Manga Generation
+# DiffSensei: マルチモーダルLLMと拡散モデルを橋渡しするカスタマイズ漫画生成
 
 <div align="center">
 
@@ -11,59 +11,47 @@
 
 </div>
 
-![Page results caption1](assets/images/results_page/caption1.png)
-
-![Page results1](assets/images/results_page/1.png)
-
-![Page results2](assets/images/results_page/2.png)
-
-More demos are in our [project page](https://jianzongwu.github.io/projects/diffsensei).
-
-### A story about LeCun, Hinton, and Benjio winning the Novel Prize...
-
-![Long story](assets/images/nobel_prize/image.png)
+デモは[プロジェクトページ](https://jianzongwu.github.io/projects/diffsensei)で公開しています。
 
 ## 🚀 TL;DR
 
-DiffSensei can generate controllable black-and-white manga panels with flexible character adaptation.
+DiffSensei は、柔軟なキャラクター適応を備えた、制御可能な白黒漫画パネルを生成できます。
 
-![](assets/images/model_architecture.png)
-
-**Key Features:**
-- 🌟 Varied-resolution manga panel generation (64-2048 edge size!)
-- 🖼️ One input character image, create various appearances
-- ✨ Versatile applications: customized manga generation, real human manga creation
+**主な特徴:**
+- 🌟 可変解像度の漫画パネル生成（辺の長さ 64〜2048 まで対応！）
+- 🖼️ 1枚の入力キャラクター画像から、さまざまな見た目を生成
+- ✨ 多彩な応用: カスタマイズ漫画生成、実写人物からの漫画制作
 
 
-## 🎉 News
+## 🎉 ニュース
 
-- [2025-2-5] The reference training code is released (t2i + condition + mllm)!
-- [2024-12-13] A new version of gradio demo without MLLM is released (Much fewer memory usage)!
-- [2024-12-10] Checkpoint, dataset, and inference code are released!
+- [2025-2-5] 参考用の学習コードを公開しました（t2i + condition + mllm）！
+- [2024-12-13] MLLM を使わない新バージョンの Gradio デモを公開しました（メモリ使用量を大幅削減）！
+- [2024-12-10] チェックポイント、データセット、推論コードを公開しました！
 
-## 🛠️ Quick Start
+## 🛠️ クイックスタート
 
-### Installation
+### インストール
 
 ``` bash
-# Create a new environment with Conda
+# Conda で新しい環境を作成
 conda create -n diffsensei python=3.11
 conda activate diffsensei
-# Install Pytorch and Diffusers related packages
+# PyTorch と Diffusers 関連パッケージをインストール
 conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
 conda install -c conda-forge diffusers transformers accelerate
 pip3 install -U xformers --index-url https://download.pytorch.org/whl/cu121
-# Install other dependencies
+# その他の依存関係をインストール
 pip install -r requirements.txt
-# Third-party repo for running the gradio demo
+# Gradio デモ実行用のサードパーティ製リポジトリ
 pip install gradio-image-prompter
 ```
 
-### Model Download
+### モデルのダウンロード
 
-Download our DiffSensei model from [huggingface](https://huggingface.co/jianzongwu/DiffSensei) and place it in the `checkpoints` folder like this:
+DiffSensei モデルを [huggingface](https://huggingface.co/jianzongwu/DiffSensei) からダウンロードし、以下のように `checkpoints` フォルダに配置してください。
 
-If you plan not to use the MLLM component, you can download the model without the MLLM component and use the `gradio_wo_mllm.py` to produce your results.
+MLLM コンポーネントを使わない場合は、MLLM なしのモデルをダウンロードし、`gradio_wo_mllm.py`（または後述の `inference.py`）で結果を生成できます。
 
 ```
 checkpoints
@@ -75,86 +63,28 @@ checkpoints
 ```
 
 
-### Inference with Gradio
+### このフォークでの学習・推論・運用
 
-We provide gradio demo for inferencing DiffSensei.
+このフォークは **RTX 5060 Ti 16GB ×1 / Windows** で、日本語同人誌（美少女・白黒漫画）向けに
+**ステージ2（キャラ注入＋レイアウト制御）のみ**を学習する構成に絞り込んでいます
+（作画は WAI Illustrious ベースに任せ、ステージ1/3 の学習スクリプトは削除済み）。
 
-``` bash
-CUDA_VISIBLE_DEVICES=0 \
-python -m scripts.demo.gradio \
-  --config_path configs/model/diffsensei.yaml \
-  --inference_config_path configs/inference/diffsensei.yaml \
-  --ckpt_path checkpoints/diffsensei
-```
+- データ準備（WAI変換 / 公開DiffSensei IP重み取得 / Magi自動アノテーション）
+- ステージ2 学習（`scripts/train/train.py` ＋ `self_finetune_wai_condition_5060ti.yaml`）
+- 推論（`DiffSenseiPipeline` を直接呼ぶ）
 
-We also offer a version without MLLM, designed for lower memory usage. If you choose this version, you can skip downloading the MLLM component in the checkpoint, significantly reducing memory consumption. (Can be run on a single 24GB 4090 GPU with batch-size=1 for small or medium panel sizes). While this version may have slightly reduced text compatibility, the overall quality remains largely unaffected.
+の具体的なコマンド・アーキテクチャ詳細・Windows 固有の注意点（マルチGPU不可・DataLoaderハング等）・
+16GB 最適化は、すべて **[CLAUDE.md](CLAUDE.md)** に集約しています。
 
-``` bash
-CUDA_VISIBLE_DEVICES=0 \
-python -m scripts.demo.gradio_wo_mllm \
-  --config_path configs/model/diffsensei.yaml \
-  --inference_config_path configs/inference/diffsensei.yaml \
-  --ckpt_path checkpoints/diffsensei
-```
-
-Please be patient. Try more prompts, characters, and random seeds, and download your favored manga panels! 🤗
-
-### The MangaZero Dataset
-
-For license issues, we cannot directly share the images. Instead, we provide the manga image urls (in MangaDex) and annotations of our MangaZero dataset.
-Note that the released version of MangaZero is about 3/4 of the full dataset used for training. The missing images is because some urls are not available. For similar usage for manga data, we strongly encourage everyone who is interested to collect their dataset freely from MangaDex, following the instruction of [MangaDex API](https://api.mangadex.org/docs/).
-
-Please download MangaZero from [Huggingface](https://huggingface.co/datasets/jianzongwu/MangaZero).
-
-After downloading the annotation file, please place the annotation file in `data/mangazero/annotations.json` and run `scripts/dataset/download_mangazero.py` to download and organize the images.
-
-``` bash
-python -m scripts.dataset.download_mangazero \
-  --ann_path data/mangazero/annotations.json \
-  --output_image_root data/mangazero/images
-```
+> 上流オリジナルの推論（Gradio/CLI デモ）・MangaZero ダウンローダ・参考用ステージ1/3 学習コードは、
+> 本構成では不要なため削除しています。上流の完全な利用方法は
+> [本家リポジトリ](https://github.com/jianzongwu/DiffSensei) を参照してください。
 
 
-### Reference Training Code
-
-We release the reference training code for t2i training, condition training, and MLLM training. This code is made publicly available to support future research efforts. However, please note that the code is still in the testing phase and cannot be guaranteed to run without adjustments. We recommend modifying the code to suit your own dataset and specific requirements.
-
-Before training, please download the checkpoints from [IP-Adaptor](https://huggingface.co/h94/IP-Adapter), [SDXL](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0), and [SEED-X](https://huggingface.co/AILab-CVC/SEED-X-17B) (For MLLM training only.)
-
-The reference code for stage 1 (t2i training) is at `scripts/train/trian_t2i.py`.
-
-``` bash
-accelerate launch \
-  --multi_gpu \
-  -m scripts.train.train_t2i.yaml \
-  --config_path configs/train/diffsensei/t2i.yaml \
-```
-
-The reference code for stage 2 (condition training) is at `scripts/train/train.py`
-
-``` bash
-accelerate launch \
-  --multi_gpu \
-  -m scripts.train.train \
-  --config_path configs/train/diffsensei/self_0.5.yaml
-```
-
-The reference code for stage 3 (MLLM training) is at `scripts/train/train_mllm.py`
-
-``` bash
-accelerate launch \
-  --multi_gpu \
-  -m scripts.train.train_mllm \
-  --config_path configs/train/diffsensei/mllm.yaml
-```
-
-The config files in each script command contain the checkpoint paths.
-
-
-## Citation
+## 引用
 
 ```
-article{wu2024diffsensei,
+@article{wu2024diffsensei,
   title={DiffSensei: Bridging Multi-Modal LLMs and Diffusion Models for Customized Manga Generation},
   author={Jianzong Wu, Chao Tang, Jingbo Wang, Yanhong Zeng, Xiangtai Li, and Yunhai Tong},
   journal={arXiv preprint arXiv:2412.07589},

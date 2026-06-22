@@ -87,8 +87,15 @@ def main(args):
         mixed_precision=config.mixed_precision,
     )
 
+    # Resolve the half-precision dtype early so we can cast frozen weights and save VRAM.
+    weight_dtype = torch.float32
+    if accelerator.mixed_precision == "fp16":
+        weight_dtype = torch.float16
+    elif accelerator.mixed_precision == "bf16":
+        weight_dtype = torch.bfloat16
+
     if accelerator.is_main_process and args.resume_log_dir is None:
-        log_dir = os.path.join("logs", config_folder, log_folder, datetime.now().strftime("%Y-%m-%d-%H:%M:%S"))
+        log_dir = os.path.join("logs", config_folder, log_folder, datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
         os.makedirs(log_dir, exist_ok=True)
         OmegaConf.save(config, os.path.join(log_dir, "config.yaml"))
     accelerator.wait_for_everyone()
@@ -158,6 +165,30 @@ def main(args):
         use_context=config.model.context_adapter
     )
 
+    # Optionally graft the released DiffSensei character-injection (`*_ip`) + dialog
+    # modules onto the (WAI) base as initialization, so we fine-tune from a working
+    # IP setup instead of random init. With `diffsensei_ip_only`, the base drawing
+    # weights stay as the (WAI) base, and only IP/dialog modules are replaced.
+    diffsensei_path = config.model.get("diffsensei_pretrained_path", None)
+    if diffsensei_path is not None:
+        ds_unet = torch.load(os.path.join(diffsensei_path, "unet", "pytorch_model.bin"), map_location="cpu")
+        if config.model.get("diffsensei_ip_only", False):
+            ds_unet = {k: v for k, v in ds_unet.items() if ("_ip" in k or "dialog" in k)}
+            missing, unexpected = unet.load_state_dict(ds_unet, strict=False)
+            logger.info(f"grafted DiffSensei IP/dialog: {len(ds_unet)} tensors, unexpected={len(unexpected)}")
+        else:
+            unet.load_state_dict(ds_unet)
+        del ds_unet
+        proj_path = os.path.join(diffsensei_path, "image_proj_model", "pytorch_model.bin")
+        if os.path.exists(proj_path):
+            ds_proj = torch.load(proj_path, map_location="cpu")
+            missing, unexpected = image_proj_model.load_state_dict(ds_proj, strict=False)
+            logger.info(f"grafted DiffSensei Resampler: missing={len(missing)} unexpected={len(unexpected)}")
+            del ds_proj
+
+    if config.get("gradient_checkpointing", False):
+        unet.enable_gradient_checkpointing()
+
     # Initialize Lora if use
     if config.model.unet_trained_parameters == 'lora':
         for name, param in unet.named_parameters():
@@ -208,7 +239,14 @@ def main(args):
                 is_train = True
         else:
             raise NotImplementedError(f"The trained parameters type {config.model.unet_trained_parameters} is not implemented yet!")
-        
+
+        # For partial training ('new'/'ip'), freeze non-trained params and cast them to
+        # half precision to fit a 16GB GPU. Trainable params stay fp32 for stable optim.
+        if config.model.unet_trained_parameters in ('new', 'ip'):
+            param.requires_grad_(is_train)
+            if not is_train:
+                param.data = param.data.to(weight_dtype)
+
         if is_train:
             unet_trained_parameters.append(param)
             unet_trained_state_dict[name] = param
@@ -220,8 +258,13 @@ def main(args):
     trained_parameters = itertools.chain(image_proj_model.parameters(), unet_trained_parameters)
     trained_state_dict = {"image_proj": image_proj_model.state_dict(), "unet_trained": unet_trained_state_dict}
 
-    # Optimizer
-    optimizer = torch.optim.AdamW(
+    # Optimizer (8-bit AdamW from bitsandbytes optionally, to save optimizer-state VRAM)
+    if config.optimizer.get("use_8bit_adam", False):
+        import bitsandbytes as bnb
+        optimizer_cls = bnb.optim.AdamW8bit
+    else:
+        optimizer_cls = torch.optim.AdamW
+    optimizer = optimizer_cls(
         trained_parameters,
         lr=config.optimizer.learning_rate,
         betas=(config.optimizer.adam_beta1, config.optimizer.adam_beta2),
@@ -262,20 +305,18 @@ def main(args):
         dataset=train_dataset,
         batch_size=config.train_batch_size
     )
+    _nw = config.train_data.get("num_workers", 8)
     train_dataloader = DataLoader(
         train_dataset,
         batch_sampler=batch_sampler,
-        num_workers=8 * accelerator.num_processes,
+        num_workers=_nw * accelerator.num_processes,
+        persistent_workers=_nw > 0,
         collate_fn=collate_fn,
     )
 
-    # For mixed precision training we cast all non-trainable weights (vae, non-lora text_encoder and non-lora unet) to half-precision
-    # as these weights are only used for inference, keeping weights in full precision is not required.
-    weight_dtype = torch.float32
-    if accelerator.mixed_precision == "fp16":
-        weight_dtype = torch.float16
-    elif accelerator.mixed_precision == "bf16":
-        weight_dtype = torch.bfloat16
+    # For mixed precision training we cast all non-trainable weights (vae, text_encoders,
+    # image_encoder) to half-precision; they are only used for inference. (weight_dtype was
+    # resolved right after the accelerator was created.)
     vae.to(accelerator.device) # use fp32
     text_encoder.to(accelerator.device, dtype=weight_dtype)
     text_encoder_2.to(accelerator.device, dtype=weight_dtype)
@@ -489,7 +530,7 @@ if __name__ == "__main__":
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--config_path", type=str, required=True)
-    parser.add_argument("--inference_config_path", type=str, required=True)
+    parser.add_argument("--inference_config_path", type=str, default=None)
     parser.add_argument("--exp_name", type=str, default="")
     parser.add_argument("--seed", type=int, default=0, help="A seed for reproducible training.")
     parser.add_argument("--checkpoints_total_limit", type=int, default=-1, help="-1 means no limit")
