@@ -184,7 +184,8 @@ class MangaTrainSizeBucketDataset(Dataset):
         for idx, box in enumerate(ip_boxes):
             if ip_exists[idx]:
                 x1, y1, x2, y2 = box
-                image = page_image.crop([x1, y1, x2, y2])
+                # 漫画なので ref(IP参照)はグレースケール化。推論側 load_ip_images と揃える
+                image = page_image.crop([x1, y1, x2, y2]).convert("L").convert("RGB")
                 if random.random() < self.ip_flip_rate:
                     image = ImageOps.mirror(image)
             else:
@@ -294,7 +295,8 @@ class MangaTrainSizeBucketDataset(Dataset):
         if self.load_context_image and len(ann['frames']) > 1 and random.random() >= self.c_drop_rate:
             context_frame_info = random.choice(ann['frames'][:frame_idx] + ann['frames'][frame_idx+1:])
             x1, y1, x2, y2 = context_frame_info["bbox"]
-            context_image = page_image.crop([x1, y1, x2, y2])
+            # context も漫画パネルのクロップなのでグレースケール化(ref と同基準)
+            context_image = page_image.crop([x1, y1, x2, y2]).convert("L").convert("RGB")
             drop_context = 0
         else:
             context_image = Image.new('RGB', (224, 224), (0, 0, 0))
@@ -385,157 +387,6 @@ def collate_fn(data):
         "crop_coords_top_left": crop_coords_top_left,
         "target_size": target_size,
     }
-
-
-class MangaEvaluationDataset(Dataset):
-    def __init__(
-        self,
-        ann_path,
-        image_root,
-        max_num_ips=4,
-        max_num_dialogs=8,
-        mask_dialog=False,
-        load_context_image=False,
-        min_ip_height=0,
-        min_ip_width=0,
-        min_image_size_step=8,
-    ):
-        with open(ann_path, 'r', encoding='utf-8') as f:
-            annotations = json.load(f)
-        self.annotations = annotations
-        self.flatten_data()
-        self.image_root = image_root
-
-        self.max_num_ips = max_num_ips
-        self.max_num_dialogs = max_num_dialogs
-
-        self.mask_dialog = mask_dialog
-
-        self.load_context_image = load_context_image
-
-        self.min_ip_height = min_ip_height
-        self.min_ip_width = min_ip_width
-        self.min_image_size_step = min_image_size_step
-
-    def flatten_data(self):
-        self.ann_plain = []
-        for annotation in self.annotations:
-            for frame in annotation['frames']:
-                frame["image_path"] = annotation["image_path"]
-                frame["page_ann"] = annotation
-                self.ann_plain.append(frame)
-
-    def get_support_ip_ids(self, ann):
-        support_ip_ids = set()
-        for frame in ann["frames"]:
-            id_count = {}
-            for char in frame["characters"]:
-                char_id = char["id"]
-                if char_id in id_count:
-                    id_count[char_id] += 1
-                else:
-                    id_count[char_id] = 1
-
-                for char_id, count in id_count.items():
-                    if count > 1:
-                        support_ip_ids.add(char_id)
-
-        return list(support_ip_ids)
-
-    def sample_and_load_ip_images(self, frame_info, support_ip_ids, ann, page_image):
-        bbox = []
-        target_ip_bboxes = []
-        frame_bbox = frame_info["bbox"]
-        sorted_characters = sorted(frame_info["characters"], key=lambda x: (x['bbox'][2] - x['bbox'][0]) * (x['bbox'][3] - x['bbox'][1]), reverse=True)
-        ip_boxes = []
-        for char in sorted_characters:
-            if char["id"] in support_ip_ids:
-                continue
-            boxes = []
-            for frame in ann['frames']:
-                for source_char in frame['characters']:
-                    if source_char['id'] == char["id"]:
-                        x1, y1, x2, y2 = source_char['bbox']
-                        char_height = y2 - y1
-                        char_width = x2 - x1
-                        if char_height > self.min_ip_height and char_width > self.min_ip_width and source_char.get('type', 0) == 0:
-                            boxes.append(source_char['bbox'])
-            if len(boxes) > 0:
-                ip_boxes.append(random.choice(boxes))
-                relative_bbox = get_relative_bbox(frame_bbox, char["bbox"])
-                bbox.append(relative_bbox)
-                target_ip_bboxes.append(char["bbox"])
-            if len(ip_boxes) >= self.max_num_ips:
-                break
-
-        ip_images = []
-        for box in ip_boxes:
-            x1, y1, x2, y2 = box
-            image = page_image.crop([x1, y1, x2, y2])
-            ip_images.append(image)
-
-        target_ip_images = []
-        for box in target_ip_bboxes:
-            x1, y1, x2, y2 = box
-            image = page_image.crop([x1, y1, x2, y2])
-            target_ip_images.append(image)
-
-        return bbox, ip_boxes, ip_images, target_ip_images
-        
-    def __len__(self):
-        return len(self.ann_plain)
-
-    def __getitem__(self, idx):
-        ann = self.ann_plain[idx]
-        image_path = os.path.join(self.image_root, ann["image_path"])
-        caption = ann["caption"]
-
-        x1, y1, x2, y2 = ann["bbox"]
-        width = round((x2 - x1) / self.min_image_size_step) * self.min_image_size_step
-        height = round((y2 - y1) / self.min_image_size_step) * self.min_image_size_step
-
-        # Load page image
-        page_image = Image.open(image_path).convert("RGB")
-        if self.mask_dialog:
-            page_image = mask_dialogs_from_image(page_image, ann["page_ann"])  
-
-        # Load IP images and IP bbox
-        # support_ip_ids = self.get_support_ip_ids(ann["page_ann"])
-        support_ip_ids = [] # there are no support ids in mangadex
-        ip_bbox, condition_ip_bbox, ip_images, target_ip_images = self.sample_and_load_ip_images(ann, support_ip_ids, ann["page_ann"], page_image)
-
-        # Load context image
-        if self.load_context_image and len(ann["page_ann"]['frames']) >= 1:
-            context_frame_info = random.choice(ann["page_ann"]['frames'])
-            x1, y1, x2, y2 = context_frame_info["bbox"]
-            context_image = page_image.crop([x1, y1, x2, y2])
-        else:
-            context_image = None
-        
-        # Load dialog bbox
-        dialog_bbox = []
-        frame_bbox = ann["bbox"]
-        for idx in np.random.permutation(len(ann["dialogs"])):
-            bbox = get_relative_bbox(frame_bbox, ann["dialogs"][idx]["bbox"])
-            dialog_bbox.append(bbox)
-            if len(dialog_bbox) >= self.max_num_dialogs:
-                break
-
-        return {
-            "image_path": image_path,
-            "caption": caption,
-            "height": height,
-            "width": width,
-            "ip_images": ip_images,
-            "target_ip_images": target_ip_images,
-            "context_image": context_image,
-            "ip_bbox": ip_bbox,
-            "condition_ip_bbox": condition_ip_bbox,
-            "dialog_bbox": dialog_bbox,
-            "frame_bbox": ann["bbox"],
-            "frame_ann": ann,
-            "ann": ann["page_ann"],
-        }
 
 
 class BucketBatchSampler(Sampler):
