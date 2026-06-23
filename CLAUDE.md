@@ -148,7 +148,6 @@ dialog bbox ────────────────→ UNet conv_in 直
 | UNet（SDXL拡張・dialog埋め込み） | `UNetMangaModel` / `src/models/unet.py`（`set_manga_modules`, `encode_dialog_bbox`） |
 | キャラ注入アテンション（核） | `MaskedIPAttnProcessor2_0` / `src/models/attention_processor.py` |
 | 画像特徴の圧縮器 | `Resampler`（Perceiver型）/ `src/models/resampler.py` |
-| MLLM（学習はしないが推論パイプラインが import） | `ContinuousLVLM` / `src/models/mllm/seed_x.py` |
 | データセット | `src/datasets/dataset_size_bucket.py`（アスペクト比バケット可変解像度） |
 | 学習済み推論（共有） | `build_pipeline` 等 / `src/inference/pipeline.py` |
 
@@ -278,5 +277,6 @@ bf16 へキャストして VRAM 節約（学習対象は fp32 維持）。`image
 - 参照画像生成: `scripts/refs/gen_wai.py`
 - 推論フィクスチャ: `configs/inference/eval_input.json`, `eval_page.json`
 - 現行学習 config: `configs/train/diffsensei/self_finetune_wai_condition_5060ti.yaml`
-- 参考 config（元リポジトリ）: `configs/train/diffsensei/self_0.5.yaml`,
-  `configs/model/diffsensei.yaml`, `configs/inference/diffsensei.yaml`
+- 参考 config（元リポジトリ・本構成では未使用。`configs/_upstream/` に隔離）:
+  `configs/_upstream/train/self_0.5.yaml`, `configs/_upstream/model/diffsensei.yaml`,
+  `configs/_upstream/inference/diffsensei.yaml`

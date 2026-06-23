@@ -36,7 +36,6 @@ from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl import
 
 from src.models.unet import UNetMangaModel
 from src.models.resampler import Resampler
-from src.models.mllm.seed_x import ContinuousLVLM
 
 
 class DiffSenseiPipeline(StableDiffusionXLPipeline):

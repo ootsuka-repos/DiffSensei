@@ -1,87 +1,57 @@
-# DiffSensei: マルチモーダルLLMと拡散モデルを橋渡しするカスタマイズ漫画生成
+# DiffSensei（WAIベース・ステージ2特化フォーク）
 
-<div align="center">
+[![arXiv](https://img.shields.io/badge/arXiv-2412.07589-b31b1b.svg)](https://arxiv.org/abs/2412.07589)
 
-[![arXiv](https://img.shields.io/badge/arXiv-2410.08261-b31b1b.svg)](https://arxiv.org/abs/2412.07589)
-[![Project Page](https://img.shields.io/badge/Project-Page-blue?logo=github-pages)](https://jianzongwu.github.io/projects/diffsensei)
-[![Video](https://img.shields.io/badge/YouTube-Video-FF0000?logo=youtube)](https://www.youtube.com/watch?v=TLJ0MYZmoXc&source_ve_path=OTY3MTQ)
-[![Checkpoint](https://img.shields.io/badge/🤗%20Huggingface-Model-yellow)](https://huggingface.co/jianzongwu/DiffSensei)
-[![Dataset](https://img.shields.io/badge/🤗%20Huggingface-Dataset-yellow)](https://huggingface.co/datasets/jianzongwu/MangaZero)
+本リポジトリは [DiffSensei](https://github.com/jianzongwu/DiffSensei)（arXiv:2412.07589, SDXL拡張の
+「複数キャラを指定位置・レイアウトで一貫生成する白黒漫画パネル生成モデル」）のフォークです。
 
+## このフォークの目的
 
-</div>
+**RTX 5060 Ti 16GB ×1 / Windows** 環境で、日本語同人誌（美少女・白黒漫画）向けに
+DiffSensei を学習・推論することに絞り込んでいます。
 
-デモは[プロジェクトページ](https://jianzongwu.github.io/projects/diffsensei)で公開しています。
+- 作画は **WAI Illustrious SDXL** が既に高品質に描けるため、**ステージ1（t2i / 作画ドメイン適応）は学習しない**。
+- 「指定キャラを・指定bbox領域に・一貫した見た目で描く」「吹き出し配置」を担う DiffSensei 独自モジュール
+  （ステージ2：キャラ注入＋レイアウト制御）**のみを学習**する。
+- **ステージ3（MLLM / SEED-X 17B）は 16GB に載らず非対応**。関連コード・参考config は削除/隔離済み。
 
-## 🚀 TL;DR
+採用ルート: WAIベースに公開 DiffSensei の IP/dialog モジュールを初期値として移植し、
+`unet_trained_parameters: new` で WAI の作画空間へ再整合学習する。
 
-DiffSensei は、柔軟なキャラクター適応を備えた、制御可能な白黒漫画パネルを生成できます。
+## クイックスタート
 
-**主な特徴:**
-- 🌟 可変解像度の漫画パネル生成（辺の長さ 64〜2048 まで対応！）
-- 🖼️ 1枚の入力キャラクター画像から、さまざまな見た目を生成
-- ✨ 多彩な応用: カスタマイズ漫画生成、実写人物からの漫画制作
+前提: Python 3.12 / PyTorch 2.9 + CUDA 12.8 / Windows 11。
 
-
-## 🎉 ニュース
-
-- [2025-2-5] 参考用の学習コードを公開しました（t2i + condition + mllm）！
-- [2024-12-13] MLLM を使わない新バージョンの Gradio デモを公開しました（メモリ使用量を大幅削減）！
-- [2024-12-10] チェックポイント、データセット、推論コードを公開しました！
-
-## 🛠️ クイックスタート
-
-### インストール
-
-``` bash
-# Conda で新しい環境を作成
-conda create -n diffsensei python=3.11
-conda activate diffsensei
-# PyTorch と Diffusers 関連パッケージをインストール
-conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
-conda install -c conda-forge diffusers transformers accelerate
-pip3 install -U xformers --index-url https://download.pytorch.org/whl/cu121
-# その他の依存関係をインストール
+```powershell
 pip install -r requirements.txt
-# Gradio デモ実行用のサードパーティ製リポジトリ
-pip install gradio-image-prompter
 ```
 
-### モデルのダウンロード
+学習・推論・データ準備の**具体的なコマンド**、アーキテクチャ詳細、Windows 固有の落とし穴、
+16GB 最適化は **[CLAUDE.md](CLAUDE.md)** に集約しています。代表的な入口だけ示すと:
 
-DiffSensei モデルを [huggingface](https://huggingface.co/jianzongwu/DiffSensei) からダウンロードし、以下のように `checkpoints` フォルダに配置してください。
+```powershell
+# 学習データ準備（WAI変換 / 公開DiffSensei初期重み取得 / 自動アノテ / latent・text キャッシュ）
+python -m scripts.train.prepare_wai
+python -m scripts.train.prepare_diffsensei
+python -m scripts.dataset.auto_annotate --image_root data --ann_path data/annotations/train.json --caption wd14
 
-MLLM コンポーネントを使わない場合は、MLLM なしのモデルをダウンロードし、`gradio_wo_mllm.py`（または後述の `inference.py`）で結果を生成できます。
+# ステージ2（condition）学習 — 単一GPU必須（accelerate launch は使わない）
+python -m scripts.train.train --config_path configs/train/diffsensei/self_finetune_wai_condition_5060ti.yaml
 
+# 推論 / 評価 / 参照立ち絵
+python -m scripts.inference.inference_trained --config ... --ckpt ... --input_json configs/inference/eval_input.json
+python -m scripts.eval.reproduce --config ... --ckpt ... --page 113
+python -m scripts.refs.gen_wai --character "shigure ui (vtuber)" --n 5 --out refs/
 ```
-checkpoints
-  |- diffsensei
-    |- image_generator
-      |- ...
-    |- mllm
-      |- ...
-```
 
+共有パイプライン構築は `src/inference/pipeline.py`。
 
-### このフォークでの学習・推論・運用
+## 上流との差分
 
-このフォークは **RTX 5060 Ti 16GB ×1 / Windows** で、日本語同人誌（美少女・白黒漫画）向けに
-**ステージ2（キャラ注入＋レイアウト制御）のみ**を学習する構成に絞り込んでいます
-（作画は WAI Illustrious ベースに任せ、ステージ1/3 の学習スクリプトは削除済み）。
-
-- データ準備: `scripts/dataset/auto_annotate.py`、`scripts/train/prepare_*.py`
-- ステージ2 学習: `python -m scripts.train.train --config_path configs/train/diffsensei/self_finetune_wai_condition_5060ti.yaml`
-- 推論: `python -m scripts.inference.inference_trained`（単一パネル）
-- 評価: `python -m scripts.eval.reproduce`（学習データ GT vs 生成）
-- 参照画像: `python -m scripts.refs.gen_wai`（WAI 立ち絵）
-
-共有パイプライン構築は `src/inference/pipeline.py`。具体的なコマンド・アーキテクチャ詳細・
-Windows 固有の注意点・16GB 最適化は **[CLAUDE.md](CLAUDE.md)** に集約しています。
-
-> 上流オリジナルの Gradio デモ・MangaZero ダウンローダ・参考用ステージ1/3 学習コードは、
-> 本構成では不要なため削除しています。上流の完全な利用方法は
-> [本家リポジトリ](https://github.com/jianzongwu/DiffSensei) を参照してください。
-
+- 上流の Gradio デモ・MangaZero ダウンローダ・参考用ステージ1/3 学習コード・MLLM(SEED-X)推論コードは、
+  本構成では不要なため削除しています。
+- 上流の参考 config は `configs/_upstream/` に隔離しています。
+- 上流の完全な利用方法は [本家リポジトリ](https://github.com/jianzongwu/DiffSensei) を参照してください。
 
 ## 引用
 
@@ -93,11 +63,3 @@ Windows 固有の注意点・16GB 最適化は **[CLAUDE.md](CLAUDE.md)** に集
   year={2024},
 }
 ```
-
-
-
-<p align="center">
-  <a href="https://star-history.com/#jianzongwu/DiffSensei&Date">
-    <img src="https://api.star-history.com/svg?repos=jianzongwu/DiffSensei&type=Date" alt="Star History Chart">
-  </a>
-</p>

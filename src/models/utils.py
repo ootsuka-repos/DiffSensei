@@ -154,10 +154,3 @@ def load_ckpt(image_proj_model, unet, ckpt_path):
 
     image_proj_model.load_state_dict(image_proj_ckpt, strict=True)
     unet.load_state_dict(checkpoint['unet_trained'], strict=False)
-
-
-def load_ckpt_mllm(unet, agent_model, ckpt_path):
-    checkpoint = torch.load(ckpt_path, map_location='cpu')
-
-    unet.load_state_dict(checkpoint["unet_trained"], strict=False)
-    agent_model.load_state_dict(checkpoint["agent_model"], strict=False)

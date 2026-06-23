@@ -644,11 +644,9 @@ def main(args):
 
 if __name__ == "__main__":
     """
-    nohup accelerate launch \
-        --multi_gpu \
-        -m scripts.train.train \
-        --config_path configs/train/diffsensei/self_0.5.yaml \
-        > nohup/train.out 2>&1 &
+    # 単一GPU必須（Windows は accelerate launch / --multi_gpu 不可）。USE_LIBUV=0 は train.py 先頭で自動設定。
+    python -m scripts.train.train \
+        --config_path configs/train/diffsensei/self_finetune_wai_condition_5060ti.yaml
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--config_path", type=str, required=True)
