@@ -1,7 +1,7 @@
 import os
 # Windows: torch's distributed TCPStore defaults to libuv, which Windows PyTorch is built
 # without. If unset, Accelerator() tries to init it and the process exits silently at startup
-# (just `python -m scripts.train.train ...` returns to the prompt). Must be set before torch is
+# (just `python -m diffsensei.cli.train.train ...` returns to the prompt). Must be set before torch is
 # imported (transformers below pulls in torch). setdefault so an explicit override still wins.
 os.environ.setdefault("USE_LIBUV", "0")
 # Reduce CUDA memory fragmentation: let the allocator grow/shrink segments instead of
@@ -21,7 +21,6 @@ import itertools
 from tqdm.auto import tqdm
 from transformers import CLIPTokenizer, CLIPTextModel, CLIPVisionModelWithProjection, CLIPTextModelWithProjection, AutoModel
 import sys
-sys.path.append(os.getcwd())
 
 import torch
 import torch.nn.functional as F
@@ -40,12 +39,12 @@ from diffusers import AutoencoderKL, DDPMScheduler
 from diffusers.training_utils import cast_training_params
 from peft import LoraConfig
 
-from src.models.unet import UNetMangaModel
-from src.models.resampler import Resampler
-from src.models.utils import load_ip_adapter, load_unet, load_ckpt, compute_ip_contrastive_loss, compute_ip_contrastive_loss_slow
-from src.datasets.utils import size_buckets
-from src.datasets.dataset_size_bucket import MangaTrainSizeBucketDataset, BucketBatchSampler, collate_fn
-from scripts.train.utils import print_gpu_memory_usage
+from diffsensei.models.unet import UNetMangaModel
+from diffsensei.models.resampler import Resampler
+from diffsensei.models.utils import load_ip_adapter, load_unet, load_ckpt, compute_ip_contrastive_loss, compute_ip_contrastive_loss_slow
+from diffsensei.datasets.utils import size_buckets
+from diffsensei.datasets.dataset_size_bucket import MangaTrainSizeBucketDataset, BucketBatchSampler, collate_fn
+from diffsensei.train_utils import print_gpu_memory_usage
 
 
 logger = get_logger(__name__, log_level="INFO")
@@ -68,7 +67,7 @@ def launch_eval(config, config_path, log_dir, ckpt_path, tag):
     env["HF_HUB_OFFLINE"] = "1"; env["TRANSFORMERS_OFFLINE"] = "1"
     out_path = os.path.join(out_dir, f"{tag}.png")
     cmd = [
-        sys.executable, "-m", "scripts.eval.reproduce",
+        sys.executable, "-m", "diffsensei.cli.eval.reproduce",
         "--config", config_path, "--ckpt", ckpt_path,
         "--ann", config.train_data.ann_path, "--image_root", config.train_data.image_root,
         "--out", out_path,
@@ -359,7 +358,7 @@ def main(args):
             "data", "latent_cache", f"wai_maxb{config.train_data.get('max_bucket_size', 512)}")
         assert os.path.isdir(latent_cache_dir), (
             f"latent cache dir not found: {latent_cache_dir}. "
-            f"Run: python -m scripts.train.precompute_latents --config {args.config_path}")
+            f"Run: python -m diffsensei.cli.train.precompute_latents --config {args.config_path}")
         logger.info(f"using precomputed latent cache: {latent_cache_dir} (VAE removed from training loop)")
 
     # Optional precomputed text-embedding cache: drops both text encoders from VRAM (~1.6GB).
@@ -369,7 +368,7 @@ def main(args):
         text_cache_dir = config.train_data.get("text_cache_dir", None) or os.path.join("data", "text_cache", "wai")
         assert os.path.isdir(text_cache_dir), (
             f"text cache dir not found: {text_cache_dir}. "
-            f"Run: python -m scripts.train.precompute_text_embeds --config {args.config_path}")
+            f"Run: python -m diffsensei.cli.train.precompute_text_embeds --config {args.config_path}")
         logger.info(f"using precomputed text cache: {text_cache_dir} (text encoders removed from training loop)")
 
     train_dataset = MangaTrainSizeBucketDataset(
@@ -645,7 +644,7 @@ def main(args):
 if __name__ == "__main__":
     """
     # 単一GPU必須（Windows は accelerate launch / --multi_gpu 不可）。USE_LIBUV=0 は train.py 先頭で自動設定。
-    python -m scripts.train.train \
+    python -m diffsensei.cli.train.train \
         --config_path configs/train/diffsensei/self_finetune_wai_condition_5060ti.yaml
     """
     parser = argparse.ArgumentParser()

@@ -2,7 +2,7 @@
 Reproduce training-data panels with the exact training-time conditioning.
 
 Usage:
-    python -m scripts.eval.reproduce --config <cfg> --ckpt <epoch-N/ckpt.pth> \
+    python -m diffsensei.cli.eval.reproduce --config <cfg> --ckpt <epoch-N/ckpt.pth> \
         --ann data/annotations/train.json --image_root data --page 80 --out outputs/repro.png
 """
 import os
@@ -17,10 +17,9 @@ from omegaconf import OmegaConf
 os.environ.setdefault("USE_LIBUV", "0")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-sys.path.insert(0, os.getcwd())
 
-from src.datasets.utils import get_relative_bbox
-from src.inference import build_pipeline, frame_gen_size, infer_eval_dtype
+from diffsensei.datasets.utils import get_relative_bbox
+from diffsensei.inference import build_pipeline, frame_gen_size, infer_eval_dtype
 
 
 def main(args):

@@ -2,7 +2,7 @@
 
 import torch
 
-from src.datasets.utils import get_bucket_size, size_buckets
+from diffsensei.datasets.utils import get_bucket_size, size_buckets
 
 
 def infer_eval_dtype(cfg, device):

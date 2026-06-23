@@ -9,7 +9,7 @@ Models used (all expected to be present in the HF cache):
   - ragavsachdeva/magi                         (Magi: crop-embedding encoder, used via trust_remote_code)
 
 Usage (standalone): prints resolved paths as JSON.
-    python -m scripts.train.hf_paths
+    python -m diffsensei.cli.train.hf_paths
 """
 import os
 import json

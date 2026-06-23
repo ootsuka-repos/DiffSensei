@@ -15,7 +15,7 @@ The target-image pipeline here is byte-for-byte the same as the dataset's __geti
 by `max_bucket_size`, so every frame maps to the identical bucket/resolution as training.
 
 Usage:
-    python -m scripts.train.precompute_latents \
+    python -m diffsensei.cli.train.precompute_latents \
         --config configs/train/diffsensei/self_finetune_wai_condition_5060ti.yaml
 """
 import os
@@ -32,10 +32,9 @@ from diffusers import AutoencoderKL
 os.environ.setdefault("USE_LIBUV", "0")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-sys.path.append(os.getcwd())
 
-from src.datasets.utils import size_buckets, get_bucket_size, resize_and_center_crop, mask_dialogs_from_image
-from src.datasets.dataset_size_bucket import image_transform
+from diffsensei.datasets.utils import size_buckets, get_bucket_size, resize_and_center_crop, mask_dialogs_from_image
+from diffsensei.datasets.dataset_size_bucket import image_transform
 
 
 def cache_dir_for(config):

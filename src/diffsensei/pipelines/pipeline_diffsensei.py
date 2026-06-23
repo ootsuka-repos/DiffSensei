@@ -34,8 +34,8 @@ from diffusers.schedulers import KarrasDiffusionSchedulers
 from diffusers.pipelines.stable_diffusion_xl.pipeline_output import StableDiffusionXLPipelineOutput
 from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl import StableDiffusionXLPipeline
 
-from src.models.unet import UNetMangaModel
-from src.models.resampler import Resampler
+from diffsensei.models.unet import UNetMangaModel
+from diffsensei.models.resampler import Resampler
 
 
 class DiffSenseiPipeline(StableDiffusionXLPipeline):

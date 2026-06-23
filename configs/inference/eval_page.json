@@ -4,7 +4,7 @@
     {
       "page_bbox": [24, 24, 872, 372],
       "prompt": "manga, monochrome, greyscale, 1girl, solo, school uniform, standing by the window, wide shot, looking outside, detailed background",
-      "ip_images": ["refs/work4.png"],
+      "ip_images": ["assets/refs/work4.png"],
       "ip_bbox": [[0.58, 0.08, 0.92, 0.98]],
       "ip_scale": 0.78,
       "dialogs": [{ "bbox": [0.04, 0.08, 0.4, 0.46], "text": "今日も\nいい天気" }]
@@ -12,7 +12,7 @@
     {
       "page_bbox": [24, 388, 430, 772],
       "prompt": "manga, monochrome, greyscale, 1girl, solo, upper body, smiling, blush, looking at viewer",
-      "ip_images": ["refs/work4.png"],
+      "ip_images": ["assets/refs/work4.png"],
       "ip_bbox": [[0.12, 0.05, 0.9, 0.98]],
       "ip_scale": 0.82,
       "dialogs": [{ "bbox": [0.4, 0.05, 0.95, 0.28], "text": "ねえ\n聞いてる？" }]
@@ -20,7 +20,7 @@
     {
       "page_bbox": [446, 388, 872, 772],
       "prompt": "manga, monochrome, greyscale, 1girl, solo, close-up face, surprised expression, hand on cheek",
-      "ip_images": ["refs/work4.png"],
+      "ip_images": ["assets/refs/work4.png"],
       "ip_bbox": [[0.05, 0.05, 0.95, 0.98]],
       "ip_scale": 0.85,
       "dialogs": [{ "bbox": [0.5, 0.7, 0.96, 0.95], "text": "えっ！？" }]
@@ -28,7 +28,7 @@
     {
       "page_bbox": [24, 788, 872, 1256],
       "prompt": "manga, monochrome, greyscale, 1girl, solo, full body, school corridor, turning back and waving, detailed background, wide shot",
-      "ip_images": ["refs/work4.png"],
+      "ip_images": ["assets/refs/work4.png"],
       "ip_bbox": [[0.1, 0.18, 0.45, 0.96]],
       "ip_scale": 0.8,
       "dialogs": [{ "bbox": [0.55, 0.06, 0.96, 0.3], "text": "また明日\nね！" }]

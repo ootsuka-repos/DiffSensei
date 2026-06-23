@@ -11,7 +11,7 @@ cache, so the giant MLLM (SEED-X, ~55GB) and duplicate encoders are NOT download
 Resilient (curl with resume + stall-retry); idempotent (skips present files).
 
 Usage:
-    python -m scripts.train.prepare_diffsensei
+    python -m diffsensei.cli.train.prepare_diffsensei
 """
 import os
 import subprocess

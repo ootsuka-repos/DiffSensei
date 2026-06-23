@@ -26,7 +26,7 @@ All bboxes are absolute page pixel coordinates (the DiffSensei dataset converts
 them to panel-relative coordinates at load time).
 
 Usage:
-    python -m scripts.dataset.auto_annotate \
+    python -m diffsensei.cli.dataset.auto_annotate \
         --image_root data \
         --ann_path data/annotations/train.json \
         --caption wd14
@@ -43,7 +43,6 @@ from tqdm.auto import tqdm
 
 import torch
 
-sys.path.append(os.getcwd())
 
 IMAGE_EXTS = (".webp", ".png", ".jpg", ".jpeg", ".bmp", ".gif")
 MAGI_REPO = "ragavsachdeva/magi"

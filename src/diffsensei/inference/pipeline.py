@@ -6,9 +6,9 @@ import torch
 from PIL import Image
 from transformers import CLIPVisionModelWithProjection, AutoModel
 
-from src.models.resampler import Resampler
-from src.models.unet import UNetMangaModel
-from src.pipelines.pipeline_diffsensei import DiffSenseiPipeline
+from diffsensei.models.resampler import Resampler
+from diffsensei.models.unet import UNetMangaModel
+from diffsensei.pipelines.pipeline_diffsensei import DiffSenseiPipeline
 
 
 def resolve_weight_dtype(cfg, device):

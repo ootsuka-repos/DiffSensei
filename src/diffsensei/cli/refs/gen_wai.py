@@ -2,7 +2,7 @@
 Generate character reference standing illustrations with WAI Illustrious SDXL (text2img).
 
 Usage:
-    python -m scripts.refs.gen_wai --character "shigure ui (vtuber)" --n 5 --out outputs/ref_shigure
+    python -m diffsensei.cli.refs.gen_wai --character "shigure ui (vtuber)" --n 5 --out outputs/ref_shigure
 """
 import os
 import sys
@@ -14,7 +14,6 @@ from diffusers import StableDiffusionXLPipeline, EulerAncestralDiscreteScheduler
 os.environ.setdefault("USE_LIBUV", "0")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-sys.path.append(os.getcwd())
 
 QUALITY = "masterpiece, best quality, amazing quality, very aesthetic, absurdres"
 NEG = ("bad quality, worst quality, worst detail, sketch, censored, lowres, "

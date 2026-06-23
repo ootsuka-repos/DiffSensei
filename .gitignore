@@ -28,19 +28,11 @@ ENV/
 .vscode
 .idea
 .DS_Store
-*.*~
-.*.swp
 
-# ログ
-logs/
-*.log
-
-# wandb
-wandb
-
-# このフォーク固有（大容量・生成物・データは追跡しない）
-nohup*
-checkpoints
-outputs*
-data
-tmp
+# モデル重み・学習データ・生成物(リポジトリには含めない)
+checkpoints/
+data/
+outputs/
+*.safetensors
+*.ckpt
+*.pt

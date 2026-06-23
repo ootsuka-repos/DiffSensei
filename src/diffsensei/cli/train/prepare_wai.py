@@ -4,7 +4,7 @@ specialized SDXL) into a diffusers folder so it can be used as the training base
 (`pretrained_model_path`).
 
 Usage:
-    python -m scripts.train.prepare_wai \
+    python -m diffsensei.cli.train.prepare_wai \
         --single_file checkpoints/waiIllustriousSDXL_v170.safetensors \
         --out checkpoints/wai-illustrious-diffusers
 """

@@ -1,8 +1,8 @@
 """
-Inference with a checkpoint produced by scripts/train/train.py.
+Inference with a checkpoint produced by diffsensei.cli.train.train.
 
 Usage:
-    python -m scripts.inference.inference_trained \
+    python -m diffsensei.cli.inference.inference_trained \
         --config configs/train/diffsensei/self_finetune_wai_condition_5060ti.yaml \
         --ckpt logs/diffsensei/self_finetune_wai_condition_5060ti/<ts>/epoch-1/ckpt.pth \
         --input_json configs/inference/eval_input.json \
@@ -19,9 +19,8 @@ from omegaconf import OmegaConf
 os.environ.setdefault("USE_LIBUV", "0")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-sys.path.insert(0, os.getcwd())
 
-from src.inference import build_pipeline, load_ip_images, resolve_weight_dtype
+from diffsensei.inference import build_pipeline, load_ip_images, resolve_weight_dtype
 
 
 def main(args):

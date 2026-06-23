@@ -8,9 +8,9 @@ background. The result is a clean "who should appear" reference for the page.
 
 Usage:
     # auto-pick the most prominent character from the dataset:
-    python -m scripts.dataset.extract_ref --ann data/annotations/train.json --image_root data --out outputs/page_ref.png
+    python -m diffsensei.cli.dataset.extract_ref --ann data/annotations/train.json --image_root data --out outputs/page_ref.png
     # or extract from a specific image you choose:
-    python -m scripts.dataset.extract_ref --source path/to/char.png --out outputs/page_ref.png
+    python -m diffsensei.cli.dataset.extract_ref --source path/to/char.png --out outputs/page_ref.png
 """
 import os
 import sys
@@ -19,7 +19,6 @@ import argparse
 
 from PIL import Image
 
-sys.path.append(os.getcwd())
 
 
 def candidate_crops(ann_path, image_root, work=None, skip_first=1):

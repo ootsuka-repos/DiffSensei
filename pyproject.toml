@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "diffsensei"
+version = "0.1.0"
+description = "SDXL ベースのマンガパネル条件付き画像生成(Stage2 フォーク)"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "torchvision",
+    "diffusers",
+    "transformers",
+    "accelerate",
+    "peft",
+    "safetensors",
+    "huggingface_hub",
+    "omegaconf",
+    "numpy",
+    "Pillow",
+    "tqdm",
+]
+
+# データ自動アノテーション(scripts/dataset/)を使う場合
+[project.optional-dependencies]
+annotate = ["dghs-imgutils"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["diffsensei*"]

@@ -13,7 +13,7 @@ Identical to train.py's text path (tokenizer max_length=77, truncation, penultim
 states, te2 pooled), using the SAME base model (WAI) so embeddings match exactly.
 
 Usage:
-    python -m scripts.train.precompute_text_embeds \
+    python -m diffsensei.cli.train.precompute_text_embeds \
         --config configs/train/diffsensei/self_finetune_wai_condition_5060ti.yaml
 """
 import os
@@ -29,7 +29,6 @@ from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjecti
 os.environ.setdefault("USE_LIBUV", "0")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-sys.path.append(os.getcwd())
 
 
 def text_cache_dir_for(config):

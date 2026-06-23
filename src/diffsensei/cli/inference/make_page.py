@@ -2,7 +2,7 @@
 Compose a full manga page from a trained DiffSensei checkpoint.
 
 Usage:
-    python -m scripts.inference.make_page \
+    python -m diffsensei.cli.inference.make_page \
         --config configs/train/diffsensei/self_finetune_wai_condition_5060ti.yaml \
         --ckpt logs/.../epoch-1/ckpt.pth \
         --spec configs/inference/eval_page.json --out outputs/page.png
@@ -19,9 +19,8 @@ from omegaconf import OmegaConf
 os.environ.setdefault("USE_LIBUV", "0")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-sys.path.insert(0, os.getcwd())
 
-from src.inference import build_pipeline, load_ip_images, resolve_weight_dtype
+from diffsensei.inference import build_pipeline, load_ip_images, resolve_weight_dtype
 
 
 def load_font(size):
