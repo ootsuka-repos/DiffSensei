@@ -1,4 +1,4 @@
-﻿"""
+"""
 Convert a single-file SDXL checkpoint (e.g. WAI Illustrious, an anime/bishoujo
 specialized SDXL) into a diffusers folder so it can be used as the training base
 (`pretrained_model_path`).

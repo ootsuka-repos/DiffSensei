@@ -1,4 +1,4 @@
-﻿"""
+"""
 Fully-automatic annotation of raw manga pages into the DiffSensei training format.
 
 For every image under `--image_root`, we run the Magi manga model

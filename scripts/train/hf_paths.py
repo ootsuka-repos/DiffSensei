@@ -1,4 +1,4 @@
-﻿"""
+"""
 Resolve the local Hugging Face cache paths for every checkpoint DiffSensei needs,
 so training can run fully offline from already-downloaded models (no `checkpoints/`
 folder required).

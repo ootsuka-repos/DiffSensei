@@ -1,4 +1,4 @@
-﻿"""
+"""
 Fetch the parts of the released DiffSensei model needed for fine-tuning / released
 inference, into `checkpoints/diffsensei/image_generator`:
   - unet/pytorch_model.bin            (~11.6 GB, the trained manga UNet)
