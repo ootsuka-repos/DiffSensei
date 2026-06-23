@@ -98,18 +98,6 @@ def compute_ip_contrastive_loss_slow(ip_image_embeds, ip_exists, config, bsz, te
     return torch.stack(losses).mean()
 
 
-def get_generator(seed, device):
-    if seed is not None:
-        if isinstance(seed, list):
-            generator = [torch.Generator(device).manual_seed(seed_item) for seed_item in seed]
-        else:
-            generator = torch.Generator(device).manual_seed(seed)
-    else:
-        generator = None
-
-    return generator
-
-
 def load_unet(unet, ckpt_path):
     state_dict = torch.load(ckpt_path, map_location="cpu")
     unet.load_state_dict(state_dict["unet_trained"], strict=False)

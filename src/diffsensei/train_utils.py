@@ -12,7 +12,3 @@ def print_gpu_memory_usage(local_rank, prefix=None):
         )
     else:
         print("CUDA is not available. No GPU detected.")
-
-
-def get_trained_state_dict(model):
-    return {name: param for name, param in model.named_parameters() if param.requires_grad}
