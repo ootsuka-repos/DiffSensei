@@ -89,16 +89,19 @@ class Resampler(nn.Module):
         magi_embedding_dim=512,
         output_dim=1024,
         ff_mult=4,
+        use_magi=True,
     ):
         super().__init__()
-        
+
         self.num_queries = num_queries
         self.output_dim = output_dim
+        self.use_magi = use_magi and magi_embedding_dim is not None
 
         self.latents = nn.Parameter(torch.randn(1, num_queries, dim) / dim**0.5)
 
         self.proj_in = nn.Linear(embedding_dim, dim)
-        self.proj_in_magi = torch.nn.Linear(magi_embedding_dim, dim)
+        if self.use_magi:
+            self.proj_in_magi = torch.nn.Linear(magi_embedding_dim, dim)
 
         self.proj_out = nn.Linear(dim, output_dim)
         self.norm_out = nn.LayerNorm(output_dim)
@@ -121,9 +124,10 @@ class Resampler(nn.Module):
         x = x.view(bsz * max_num_ips, sequence_length, -1)
 
         x = self.proj_in(x)
-        magi_image_embeds = self.proj_in_magi(magi_image_embeds)
-        magi_image_embeds = magi_image_embeds.view(bsz * max_num_ips, 1, -1)
-        x = torch.cat([x, magi_image_embeds], dim=1)
+        if self.use_magi and magi_image_embeds is not None:
+            magi_image_embeds = self.proj_in_magi(magi_image_embeds)
+            magi_image_embeds = magi_image_embeds.view(bsz * max_num_ips, 1, -1)
+            x = torch.cat([x, magi_image_embeds], dim=1)
 
         latents = self.latents.repeat(x.size(0), 1, 1)
 

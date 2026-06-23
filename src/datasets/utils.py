@@ -121,6 +121,23 @@ size_buckets = [
 ]
 
 
+def _make_area_tier(size, ratios):
+    """Build a bucket tier of total area ~size*size for the given aspect ratios (height/width),
+    with sides rounded to multiples of 8 (same convention as the hand-written tiers above)."""
+    out = []
+    for r in ratios:
+        h = max(8, int(round(((size * size) * r) ** 0.5 / 8)) * 8)
+        w = max(8, int(round(((size * size) / r) ** 0.5 / 8)) * 8)
+        out.append([h, w, h / w])
+    return {"size": size, "buckets": out}
+
+
+# SDXL "highres" tier (~1280x1280): lets large panels train near 1280, above the native 1024
+# tier. Only used when the training filter keeps it (max_bucket_size >= 1280). Reuses the same
+# 33 aspect ratios as the 1024 tier so bucketing stays consistent.
+size_buckets.append(_make_area_tier(1280, [b[2] for b in size_buckets[2]["buckets"]]))
+
+
 size_buckets_flux = [
     {
         "size": 256,

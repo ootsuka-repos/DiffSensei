@@ -1,10 +1,22 @@
+import os
+# Windows: torch's distributed TCPStore defaults to libuv, which Windows PyTorch is built
+# without. If unset, Accelerator() tries to init it and the process exits silently at startup
+# (just `python -m scripts.train.train ...` returns to the prompt). Must be set before torch is
+# imported (transformers below pulls in torch). setdefault so an explicit override still wins.
+os.environ.setdefault("USE_LIBUV", "0")
+# Reduce CUDA memory fragmentation: let the allocator grow/shrink segments instead of
+# reserving fixed blocks. Lets larger resolutions fit in the same 16GB by reclaiming
+# "reserved but unallocated" gaps. Harmless if the user already set it. Must be set
+# before torch is imported.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 import argparse
 import logging
 from omegaconf import OmegaConf
-import os
 from datetime import datetime
 import time
 import gc
+import subprocess
 import itertools
 from tqdm.auto import tqdm
 from transformers import CLIPTokenizer, CLIPTextModel, CLIPVisionModelWithProjection, CLIPTextModelWithProjection, AutoModel
@@ -38,6 +50,39 @@ from scripts.utils import print_gpu_memory_usage
 
 logger = get_logger(__name__, log_level="INFO")
 logging.getLogger('PIL').setLevel(logging.WARNING)
+
+
+def launch_eval(config, config_path, log_dir, ckpt_path, tag):
+    """Fire-and-forget test inference of the just-saved checkpoint, on a SEPARATE GPU so it
+    never competes with training for VRAM. REPRODUCES an actual TRAINING-DATA page with the
+    exact training-time conditioning (caption / ip_bbox / dialog_bbox / self-condition refs)
+    and saves a GT-vs-generated comparison into <log_dir>/samples/<tag>.png. The eval page is
+    chosen from the same annotation file the model is training on. Controlled by `eval`."""
+    ev = config.get("eval", None)
+    if ev is None or not ev.get("enable", False):
+        return None
+    out_dir = os.path.join(log_dir, "samples")
+    os.makedirs(out_dir, exist_ok=True)
+    env = dict(os.environ)
+    env["CUDA_VISIBLE_DEVICES"] = str(ev.get("gpu", 1))   # default: GPU1 (training uses GPU0)
+    env["HF_HUB_OFFLINE"] = "1"; env["TRANSFORMERS_OFFLINE"] = "1"
+    out_path = os.path.join(out_dir, f"{tag}.png")
+    cmd = [
+        sys.executable, "-m", "scripts.demo.reproduce",
+        "--config", config_path, "--ckpt", ckpt_path,
+        "--ann", config.train_data.ann_path, "--image_root", config.train_data.image_root,
+        "--out", out_path,
+        "--steps", str(ev.get("steps", 28)),
+        "--ip_scale", str(ev.get("ip_scale", 0.7)),
+    ]
+    if ev.get("page", None) is not None:
+        cmd += ["--page", str(ev.get("page"))]
+    try:
+        logger.info(f"[eval] reproducing a training page (GT vs gen) -> {out_path} (GPU {env['CUDA_VISIBLE_DEVICES']})")
+        return subprocess.Popen(cmd, env=env)
+    except Exception as e:
+        logger.warning(f"[eval] failed to launch: {e}")
+        return None
 
 
 def mean_multiple_ip_embeds(image_embeds, ip_exists, config, bsz):
@@ -213,7 +258,12 @@ def main(args):
         load_ckpt(image_proj_model, unet, config.model.manga_pretrained_model_path)
     
     # Load resume checkpoints if resume
-    if args.resume_log_dir is not None:
+    if args.resume_ckpt is not None:
+        # Resume the trained weights (image_proj + unet_trained) from a specific ckpt.pth,
+        # e.g. logs/.../epoch-34/ckpt.pth. Continues fine-tuning the same modules.
+        load_ckpt(image_proj_model, unet, args.resume_ckpt)
+        logger.info(f"resumed trained weights from {args.resume_ckpt}")
+    elif args.resume_log_dir is not None:
         all_ckpt_steps = [d for d in os.listdir(log_dir) if d.startswith("step-")]
         last_ckpt_step = int(sorted(all_ckpt_steps, key=lambda x: int(x.split("-")[1]))[-1].split('-')[-1])
         load_ckpt(image_proj_model, unet, os.path.join(log_dir, f"step-{last_ckpt_step}", "ckpt.pth"))
@@ -258,10 +308,12 @@ def main(args):
     trained_parameters = itertools.chain(image_proj_model.parameters(), unet_trained_parameters)
     trained_state_dict = {"image_proj": image_proj_model.state_dict(), "unet_trained": unet_trained_state_dict}
 
-    # Optimizer (8-bit AdamW from bitsandbytes optionally, to save optimizer-state VRAM)
+    # Optimizer (8-bit AdamW from bitsandbytes optionally, to save optimizer-state VRAM).
+    # `paged: true` uses PagedAdamW8bit: optimizer state lives in unified memory and is paged
+    # to CPU on demand, so a transient VRAM spike near the limit doesn't OOM the whole run.
     if config.optimizer.get("use_8bit_adam", False):
         import bitsandbytes as bnb
-        optimizer_cls = bnb.optim.AdamW8bit
+        optimizer_cls = bnb.optim.PagedAdamW8bit if config.optimizer.get("paged", False) else bnb.optim.AdamW8bit
     else:
         optimizer_cls = torch.optim.AdamW
     optimizer = optimizer_cls(
@@ -283,10 +335,47 @@ def main(args):
     )
 
     # DataLoader
+    # Cap training resolution to fit a 16GB GPU. `size_buckets` has tiers keyed by their square
+    # side ("size": 256/512/1024/1280): a tier's square bucket is size x size, with aspect-ratio
+    # variants of the same area. We keep tiers whose SQUARE side <= max_bucket_size, so e.g.
+    # max_bucket_size=1024 trains squares up to 1024x1024 (SDXL native), 1280 up to ~1280x1280.
+    # (Earlier this filtered on max *side*, which made "1024" secretly cap squares at 512.)
+    max_bucket = config.train_data.get("max_bucket_size", 512)
+    if max_bucket is not None:
+        train_size_buckets = [t for t in size_buckets if t["size"] <= max_bucket]
+        if not train_size_buckets:
+            train_size_buckets = size_buckets
+    else:
+        train_size_buckets = size_buckets
+    tiers_str = ",".join(str(t["size"]) for t in train_size_buckets)
+    logger.info(f"using {len(train_size_buckets)}/{len(size_buckets)} bucket tiers (square <= {max_bucket}; tiers: {tiers_str})")
+
+    # Optional precomputed VAE latent cache: drops the VAE from the training loop entirely
+    # (no fp32 encode, no VAE weights on GPU) — the biggest single VRAM saving at high res.
+    use_latent_cache = config.train_data.get("use_latent_cache", False)
+    latent_cache_dir = None
+    if use_latent_cache:
+        latent_cache_dir = config.train_data.get("latent_cache_dir", None) or os.path.join(
+            "data", "latent_cache", f"wai_maxb{config.train_data.get('max_bucket_size', 512)}")
+        assert os.path.isdir(latent_cache_dir), (
+            f"latent cache dir not found: {latent_cache_dir}. "
+            f"Run: python -m scripts.train.precompute_latents --config {args.config_path}")
+        logger.info(f"using precomputed latent cache: {latent_cache_dir} (VAE removed from training loop)")
+
+    # Optional precomputed text-embedding cache: drops both text encoders from VRAM (~1.6GB).
+    use_text_cache = config.train_data.get("use_text_cache", False)
+    text_cache_dir = None
+    if use_text_cache:
+        text_cache_dir = config.train_data.get("text_cache_dir", None) or os.path.join("data", "text_cache", "wai")
+        assert os.path.isdir(text_cache_dir), (
+            f"text cache dir not found: {text_cache_dir}. "
+            f"Run: python -m scripts.train.precompute_text_embeds --config {args.config_path}")
+        logger.info(f"using precomputed text cache: {text_cache_dir} (text encoders removed from training loop)")
+
     train_dataset = MangaTrainSizeBucketDataset(
         ann_path=config.train_data.ann_path,
         image_root=config.train_data.image_root,
-        size_buckets=size_buckets,
+        size_buckets=train_size_buckets,
         tokenizer=tokenizer,
         tokenizer_2=tokenizer_2,
         t_drop_rate=config.train_data.t_drop_rate,
@@ -300,6 +389,8 @@ def main(args):
         ip_self_condition_rate=config.train_data.ip_self_condition_rate,
         min_ip_height=config.train_data.min_ip_height,
         min_ip_width=config.train_data.min_ip_width,
+        latent_cache_dir=latent_cache_dir,
+        text_cache_dir=text_cache_dir,
     )
     batch_sampler = BucketBatchSampler(
         dataset=train_dataset,
@@ -317,9 +408,31 @@ def main(args):
     # For mixed precision training we cast all non-trainable weights (vae, text_encoders,
     # image_encoder) to half-precision; they are only used for inference. (weight_dtype was
     # resolved right after the accelerator was created.)
-    vae.to(accelerator.device) # use fp32
-    text_encoder.to(accelerator.device, dtype=weight_dtype)
-    text_encoder_2.to(accelerator.device, dtype=weight_dtype)
+    #
+    # VAE: the fp32 VAE encode is the single biggest activation hog at high resolution and the
+    # usual 16GB OOM trigger. Run it in bf16 by default (bf16's wide exponent range avoids the
+    # fp16-VAE NaN problem), and tile+slice the encode so its peak memory stays flat as the
+    # resolution grows. This is what makes the 1024 tier fit.
+    vae_dtype = weight_dtype
+    _vd = config.train_data.get("vae_dtype", "bf16")
+    vae_dtype = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}.get(_vd, weight_dtype)
+    if use_latent_cache:
+        # latents come from the cache; keep the VAE off the GPU (only its scaling_factor is used).
+        vae_scaling_factor = vae.config.scaling_factor
+        vae.to("cpu")
+    else:
+        vae.to(accelerator.device, dtype=vae_dtype)
+        vae_scaling_factor = vae.config.scaling_factor
+        if config.train_data.get("vae_tiling", True):
+            vae.enable_slicing()
+            vae.enable_tiling()
+    if use_text_cache:
+        # text embeds come from the cache; keep both text encoders off the GPU.
+        text_encoder.to("cpu")
+        text_encoder_2.to("cpu")
+    else:
+        text_encoder.to(accelerator.device, dtype=weight_dtype)
+        text_encoder_2.to(accelerator.device, dtype=weight_dtype)
     image_encoder.to(accelerator.device, dtype=weight_dtype)
     if magi_image_encoder is not None:
         magi_image_encoder.to(accelerator.device, dtype=weight_dtype)
@@ -369,16 +482,31 @@ def main(args):
         for bucket_key, value in train_dataset.buckets.items():
             logger.info(f"{bucket_key}: {len(value)}")
 
+    # Epoch-based training. One epoch = one full pass over the dataloader.
+    steps_per_epoch = max(1, len(train_dataloader) // config.gradient_accumulation_steps)
+    if config.get("num_train_epochs", None):
+        num_train_epochs = int(config.num_train_epochs)
+    else:
+        num_train_epochs = max(1, (config.max_train_steps + steps_per_epoch - 1) // steps_per_epoch)
+    save_every = int(config.get("checkpointing_epochs", 1))
+    logger.info(f"  Epochs = {num_train_epochs} (steps/epoch ~ {steps_per_epoch}); checkpoint+eval every {save_every} epoch(s)")
+
     unet.train()
-    while global_step < config.max_train_steps:
+    eval_procs = []
+    for epoch in range(num_train_epochs):
         begin = time.perf_counter()
         for step, batch in enumerate(train_dataloader):
             load_data_time = time.perf_counter() - begin
             with accelerator.accumulate(image_proj_model, unet):
-                # Convert images to latent space
+                # Convert images to latent space (or sample from the precomputed latent cache).
                 with torch.no_grad():
-                    latents = vae.encode(batch["images"].to(accelerator.device, dtype=torch.float32)).latent_dist.sample()
-                    latents = latents * vae.config.scaling_factor
+                    if batch.get("latent_mean", None) is not None:
+                        mean = batch["latent_mean"].to(accelerator.device, dtype=torch.float32)
+                        std = batch["latent_std"].to(accelerator.device, dtype=torch.float32)
+                        latents = mean + std * torch.randn_like(mean)   # reparameterized VAE sample
+                    else:
+                        latents = vae.encode(batch["images"].to(accelerator.device, dtype=vae_dtype)).latent_dist.sample()
+                    latents = latents * vae_scaling_factor
                     latents = latents.to(accelerator.device, dtype=weight_dtype)
 
                 # Sample the noise
@@ -420,14 +548,18 @@ def main(args):
                 # Mean the max_num_ip_sources dimension
                 image_embeds = mean_multiple_ip_embeds(image_embeds, batch["ip_exists"], config, bsz) # [bsz, num_dummy_tokens + max_num_ips * num_vision_tokens, cross_attn_dim]
 
-                # Encode text prompt
-                with torch.no_grad():
-                    encoder_output = text_encoder(batch['text_input_ids'].to(accelerator.device), output_hidden_states=True)
-                    encoder_output_2 = text_encoder_2(batch['text_input_ids_2'].to(accelerator.device), output_hidden_states=True)
-                text_embeds = encoder_output.hidden_states[-2]
-                pooled_text_embeds = encoder_output_2[0]
-                text_embeds_2 = encoder_output_2.hidden_states[-2]
-                text_embeds = torch.concat([text_embeds, text_embeds_2], dim=-1)
+                # Text condition: from cache, or encode live.
+                if batch.get("text_embeds", None) is not None:
+                    text_embeds = batch["text_embeds"].to(accelerator.device, dtype=weight_dtype)
+                    pooled_text_embeds = batch["pooled_text_embeds"].to(accelerator.device, dtype=weight_dtype)
+                else:
+                    with torch.no_grad():
+                        encoder_output = text_encoder(batch['text_input_ids'].to(accelerator.device), output_hidden_states=True)
+                        encoder_output_2 = text_encoder_2(batch['text_input_ids_2'].to(accelerator.device), output_hidden_states=True)
+                    text_embeds = encoder_output.hidden_states[-2]
+                    pooled_text_embeds = encoder_output_2[0]
+                    text_embeds_2 = encoder_output_2.hidden_states[-2]
+                    text_embeds = torch.concat([text_embeds, text_embeds_2], dim=-1)
 
                 # Concat other embeddings into text_embeds
                 encoder_hidden_states = torch.cat([text_embeds, image_embeds], dim=1)
@@ -471,27 +603,7 @@ def main(args):
                 progress_bar.update(1)
                 global_step += 1
 
-            if config.checkpoints_total_limit != 0:
-                if global_step in config.checkpointing_steps or global_step % config.checkpointing_interval == 0:
-                    # Save checkpoints in checkpointing_steps and checkpointing_interval
-                    # Run evaluation after saving checkpoints
-                    if accelerator.is_main_process:
-                        all_steps = [d for d in os.listdir(log_dir) if d.startswith("step-")]
-                        all_steps = sorted(all_steps, key=lambda x: int(x.split("-")[1]))
-
-                        if config.checkpoints_total_limit > 0 and len(all_steps) == config.checkpoints_total_limit:
-                            removing_step = all_steps[0]
-                            removing_step_dir = os.path.join(log_dir, removing_step)
-                            ckpt_file = os.path.join(removing_step_dir, "ckpt.pth")
-                            os.remove(ckpt_file)
-                            logger.info(f"{len(all_steps)} checkpoint steps already exist, removing the oldest step")
-
-                        step_dir = os.path.join(log_dir, f"step-{global_step}")
-                        save_path = os.path.join(step_dir, "ckpt.pth")
-                        os.makedirs(step_dir, exist_ok=True)
-                        trained_state_dict = {"image_proj": accelerator.unwrap_model(image_proj_model).state_dict(), "unet_trained": unet_trained_state_dict} # must add, to update the state_dict of image_proj_model
-                        torch.save(trained_state_dict, save_path)
-                        logger.info(f"Saved state to {save_path}")
+            # (checkpointing + test inference happen at the end of each epoch, below)
 
             avg_loss_diffusion = accelerator.gather(loss_diffusion.unsqueeze(0)).mean().detach().item()
             avg_ip_contrastive_loss = accelerator.gather(loss_ip_contrastive.unsqueeze(0)).mean().detach().item()
@@ -508,11 +620,21 @@ def main(args):
                 tb_writer.add_scalar("Diffusion Loss", avg_loss_diffusion, global_step)
                 tb_writer.add_scalar("IP Contastive Loss", avg_ip_contrastive_loss, global_step)
 
-            if global_step >= config.max_train_steps:
-                break
-
             begin = time.perf_counter()
             # print_gpu_memory_usage(accelerator.local_process_index)
+
+        # --- End of epoch: save checkpoint + fire a test inference on a separate GPU ---
+        if accelerator.is_main_process and config.checkpoints_total_limit != 0 and (epoch + 1) % save_every == 0:
+            ep_dir = os.path.join(log_dir, f"epoch-{epoch + 1}")
+            os.makedirs(ep_dir, exist_ok=True)
+            save_path = os.path.join(ep_dir, "ckpt.pth")
+            trained_state_dict = {"image_proj": accelerator.unwrap_model(image_proj_model).state_dict(), "unet_trained": unet_trained_state_dict}
+            torch.save(trained_state_dict, save_path)
+            logger.info(f"[epoch {epoch + 1}/{num_train_epochs}] saved {save_path} (global_step={global_step})")
+            eval_procs = [p for p in eval_procs if p.poll() is None]   # reap finished evals
+            proc = launch_eval(config, args.config_path, log_dir, save_path, f"epoch-{epoch + 1}")
+            if proc is not None:
+                eval_procs.append(proc)
 
     # Create the pipeline using the trained modules and save it.
     accelerator.wait_for_everyone()
@@ -535,6 +657,8 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0, help="A seed for reproducible training.")
     parser.add_argument("--checkpoints_total_limit", type=int, default=-1, help="-1 means no limit")
     parser.add_argument("--resume_log_dir", type=str, default=None)
+    parser.add_argument("--resume_ckpt", type=str, default=None,
+                        help="resume trained weights from a specific ckpt.pth (e.g. logs/.../epoch-34/ckpt.pth)")
     args = parser.parse_args()
     
     main(args)

@@ -40,11 +40,20 @@ class MangaTrainSizeBucketDataset(Dataset):
         ip_flip_rate=0.5,
         min_ip_height=5,
         min_ip_width=5,
+        latent_cache_dir=None,
+        text_cache_dir=None,
     ):
-        with open(ann_path, 'r') as f:
+        with open(ann_path, 'r', encoding='utf-8') as f:
             annotations = json.load(f)
         self.annotations = annotations
         self.image_root = image_root
+        # When set, target-panel VAE latents are loaded from this dir (precompute_latents.py)
+        # instead of being encoded at train time, so the VAE is dropped from the training loop.
+        self.latent_cache_dir = latent_cache_dir
+        # When set, SDXL text embeds are loaded from this dir (precompute_text_embeds.py)
+        # instead of running the text encoders at train time.
+        self.text_cache_dir = text_cache_dir
+        self._empty_text = None  # lazily loaded empty-caption embedding
         self.size_buckets = size_buckets
         self.buckets = {}
         self.bucket_size_index = {}
@@ -226,33 +235,54 @@ class MangaTrainSizeBucketDataset(Dataset):
         width = x2 - x1
         height = y2 - y1
 
-        page_image = Image.open(image_path).convert("RGB") 
+        page_image = Image.open(image_path).convert("RGB")
         if self.mask_dialog:
-            page_image = mask_dialogs_from_image(page_image, ann)   
-        image = page_image.crop([x1, y1, x2, y2])
-        image, crop_coords_top_left = resize_and_center_crop(image, (bucket_height, bucket_width))
-        image = image_transform(image)
+            page_image = mask_dialogs_from_image(page_image, ann)
 
-        # Tokenize caption
-        if random.random() < self.t_drop_rate:
-            caption = ""
+        # Target panel: either load a precomputed VAE latent (cache) or build the pixel target.
+        latent_mean = latent_std = None
+        image = None
+        if self.latent_cache_dir is not None:
+            cache_path = os.path.join(self.latent_cache_dir, f"{ann_idx}_{frame_idx}.pt")
+            blob = torch.load(cache_path, map_location="cpu")
+            latent_mean = blob["mean"].float()
+            latent_std = blob["std"].float()
+            crop_coords_top_left = tuple(blob["crop_coords"])
         else:
-            caption = frame_info["caption"]
-        text_input_ids = self.tokenizer(
-            caption,
-            max_length=self.tokenizer.model_max_length,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt"
-        ).input_ids
-        
-        text_input_ids_2 = self.tokenizer_2(
-            caption,
-            max_length=self.tokenizer_2.model_max_length,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt"
-        ).input_ids
+            image = page_image.crop([x1, y1, x2, y2])
+            image, crop_coords_top_left = resize_and_center_crop(image, (bucket_height, bucket_width))
+            image = image_transform(image)
+
+        # Text condition: either load precomputed embeds (cache) or tokenize for live encoding.
+        text_input_ids = text_input_ids_2 = None
+        text_embeds = pooled_text_embeds = None
+        drop_text = random.random() < self.t_drop_rate
+        if self.text_cache_dir is not None:
+            if drop_text:
+                if self._empty_text is None:
+                    self._empty_text = torch.load(os.path.join(self.text_cache_dir, "empty.pt"), map_location="cpu")
+                blob = self._empty_text
+            else:
+                blob = torch.load(os.path.join(self.text_cache_dir, f"{ann_idx}_{frame_idx}.pt"), map_location="cpu")
+            text_embeds = blob["text_embeds"].float()
+            pooled_text_embeds = blob["pooled"].float()
+        else:
+            caption = "" if drop_text else frame_info["caption"]
+            text_input_ids = self.tokenizer(
+                caption,
+                max_length=self.tokenizer.model_max_length,
+                padding="max_length",
+                truncation=True,
+                return_tensors="pt"
+            ).input_ids
+
+            text_input_ids_2 = self.tokenizer_2(
+                caption,
+                max_length=self.tokenizer_2.model_max_length,
+                padding="max_length",
+                truncation=True,
+                return_tensors="pt"
+            ).input_ids
 
         # Get support IP IDs
         support_ip_ids = self.get_support_ip_ids(ann)
@@ -284,8 +314,12 @@ class MangaTrainSizeBucketDataset(Dataset):
 
         return {
             "image": image,
+            "latent_mean": latent_mean,
+            "latent_std": latent_std,
             "text_input_ids": text_input_ids,
             "text_input_ids_2": text_input_ids_2,
+            "text_embeds": text_embeds,
+            "pooled_text_embeds": pooled_text_embeds,
             "ip_exists": torch.Tensor(ip_exists).view(self.max_num_ips, self.max_num_ip_sources),
             "ip_images": ip_images,
             "magi_ip_images": magi_ip_images,
@@ -303,9 +337,24 @@ class MangaTrainSizeBucketDataset(Dataset):
 def collate_fn(data):
     data = [example for example in data if example["is_pseudo_sample"] == False]
 
-    images = torch.stack([example["image"] for example in data])
-    text_input_ids = torch.cat([example["text_input_ids"] for example in data], dim=0)
-    text_input_ids_2 = torch.cat([example["text_input_ids_2"] for example in data], dim=0)
+    # Target panel: cached latents (mean/std) if present, else pixel images for live VAE encode.
+    if data[0].get("latent_mean", None) is not None:
+        images = None
+        latent_mean = torch.stack([example["latent_mean"] for example in data])
+        latent_std = torch.stack([example["latent_std"] for example in data])
+    else:
+        images = torch.stack([example["image"] for example in data])
+        latent_mean = latent_std = None
+
+    # Text condition: cached embeds if present, else token ids for live text encoders.
+    if data[0].get("text_embeds", None) is not None:
+        text_input_ids = text_input_ids_2 = None
+        text_embeds = torch.stack([example["text_embeds"] for example in data])
+        pooled_text_embeds = torch.stack([example["pooled_text_embeds"] for example in data])
+    else:
+        text_embeds = pooled_text_embeds = None
+        text_input_ids = torch.cat([example["text_input_ids"] for example in data], dim=0)
+        text_input_ids_2 = torch.cat([example["text_input_ids_2"] for example in data], dim=0)
     ip_exists = torch.stack([example["ip_exists"] for example in data], dim=0)
     ip_images = torch.cat([example["ip_images"] for example in data], dim=0)
     magi_ip_images = torch.cat([example["magi_ip_images"] for example in data], dim=0)
@@ -319,8 +368,12 @@ def collate_fn(data):
 
     return {
         "images": images,
+        "latent_mean": latent_mean,
+        "latent_std": latent_std,
         "text_input_ids": text_input_ids,
         "text_input_ids_2": text_input_ids_2,
+        "text_embeds": text_embeds,
+        "pooled_text_embeds": pooled_text_embeds,
         "ip_exists": ip_exists,
         "ip_images": ip_images,
         "magi_ip_images": magi_ip_images,
@@ -347,7 +400,7 @@ class MangaEvaluationDataset(Dataset):
         min_ip_width=0,
         min_image_size_step=8,
     ):
-        with open(ann_path, 'r') as f:
+        with open(ann_path, 'r', encoding='utf-8') as f:
             annotations = json.load(f)
         self.annotations = annotations
         self.flatten_data()

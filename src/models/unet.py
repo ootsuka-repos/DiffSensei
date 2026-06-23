@@ -46,11 +46,18 @@ class UNetMangaModel(UNet2DConditionModel):
         max_num_ips = 4,
         num_vision_tokens = 16,
         max_num_dialogs = 8,
+        dialog_bbox_encode_type = "mask",
+        use_context = False,
     ):
         # Register parameters in config
         self.config.max_num_ips = max_num_ips
         self.config.max_num_dialogs = max_num_dialogs
         self.config.num_vision_tokens = num_vision_tokens
+        # `dialog_bbox_encode_type` / `use_context` are accepted for compatibility with the
+        # training scripts. The released inference path uses the masked dialog-bbox embedding
+        # ("mask"); the context-adapter ("use_context") is optional and disabled by default.
+        self.config.dialog_bbox_encode_type = dialog_bbox_encode_type
+        self.config.use_context = use_context
 
         # Register image cross attention in unet
         attn_procs = {}

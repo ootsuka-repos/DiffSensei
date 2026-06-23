@@ -45,7 +45,19 @@ train_data:
   max_num_ip_sources: 1
   min_ip_height: 3
   min_ip_width: 3
-  num_workers: 2                  # Windows: >2 workers hangs the DataLoader
+  max_bucket_size: 1280           # train SQUARES up to this side. SDXL is native 1024; ~1280 is its
+                                  # high-res sweet spot. Tiers kept: size <= 1280 (256/512/1024/1280),
+                                  # so large panels train near 1280x1280, smaller panels at their own tier.
+                                  # NOTE: this filters by tier square-size (not max side). VAE+text are
+                                  # cached out of the loop, so the headroom is for the UNet forward only.
+                                  # If you OOM at 1280, drop to 1024 and rebuild the latent cache.
+  vae_dtype: bf16                 # run VAE in bf16 (not fp32): biggest activation saving at high res; bf16 avoids fp16-VAE NaNs
+  vae_tiling: true                # tile+slice the VAE encode so its peak memory stays flat as resolution grows
+  use_latent_cache: true          # use precomputed target latents (scripts.train.precompute_latents) -> VAE off the GPU entirely.
+                                  # MUST run precompute_latents first; rebuild it whenever ann/max_bucket_size/base-VAE change.
+  use_text_cache: true            # use precomputed text embeds (scripts.train.precompute_text_embeds) -> text encoders off the GPU (~1.6GB).
+                                  # MUST run precompute_text_embeds first; rebuild whenever ann captions / base text encoders change.
+  num_workers: 0                  # Windows: spawn-based workers crash/hang silently; 0 = load in main process (robust)
 
 optimizer:
   learning_rate: 1e-4
@@ -54,6 +66,7 @@ optimizer:
   adam_epsilon: 1.0e-08
   adam_weight_decay: 0.01
   use_8bit_adam: true
+  paged: true                     # PagedAdamW8bit: pages optimizer state to CPU on VRAM spikes (OOM safety at 1024)
 
 lr_scheduler:
   name: constant
@@ -66,8 +79,24 @@ gradient_accumulation_steps: 4
 gradient_checkpointing: true
 mixed_precision: bf16
 
-max_train_steps: 2000
+# Epoch-based training. One epoch = one full pass over the dataset.
+# ~151 optimizer steps/epoch, so 2,000,000 steps ~= 13245 epochs (effectively "train forever";
+# stop manually when the samples look good, resume later with --resume_ckpt).
+num_train_epochs: 13245
+checkpointing_epochs: 1          # save a checkpoint + run a test inference every epoch
+max_train_steps: 2000000         # LR-scheduler / progress-bar horizon
 checkpointing_steps: []
 checkpointing_interval: 300
 evaluation_steps: []
 evaluation_interval: 300
+
+# Test inference run automatically at the end of each saved epoch, on a SEPARATE GPU
+# (so it never competes with training for VRAM). REPRODUCES an actual training-data page with
+# the exact training-time conditioning (caption / ip_bbox / dialog_bbox / self-condition refs)
+# and saves a GT-vs-generated comparison -> logs/.../<run>/samples/epoch-N.png
+eval:
+  enable: true
+  gpu: 1                          # GPU index for eval (training uses GPU0)
+  page: 113                       # which annotation page to reproduce (fixed, for comparable progress); null = auto-pick
+  steps: 28
+  ip_scale: 0.7
