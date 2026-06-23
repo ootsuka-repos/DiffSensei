@@ -1,17 +1,11 @@
 """
-Compose a full manga PAGE from a trained DiffSensei checkpoint.
-
-DiffSensei generates ONE panel at a time. This script loads the trained pipeline once,
-generates each panel from a page spec (prompt / reference characters / character bbox /
-dialog bbox), composites the panels onto a white page canvas with black borders, and
-overlays the (real, readable) Japanese dialogue into the speech-bubble regions with PIL
-— the diffusion model only reserves the bubble area, it cannot render text itself.
+Compose a full manga page from a trained DiffSensei checkpoint.
 
 Usage:
-    python -m scripts.demo.make_page \
+    python -m scripts.inference.make_page \
         --config configs/train/diffsensei/self_finetune_wai_condition_5060ti.yaml \
         --ckpt logs/.../epoch-1/ckpt.pth \
-        --spec scripts/demo/eval_page.json --out outputs/page.png
+        --spec configs/inference/eval_page.json --out outputs/page.png
 """
 import os
 import sys
@@ -27,7 +21,7 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 sys.path.insert(0, os.getcwd())
 
-from scripts.demo.inference_trained import build_pipeline, load_ip_images
+from src.inference import build_pipeline, load_ip_images, resolve_weight_dtype
 
 
 def load_font(size):
@@ -74,7 +68,7 @@ def main(args):
     cfg = OmegaConf.load(args.config)
     spec = json.load(open(args.spec, encoding="utf-8"))
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    wd = torch.float16 if device.startswith("cuda") else torch.float32
+    wd = resolve_weight_dtype(cfg, device)
 
     pipe = build_pipeline(cfg, args.ckpt, wd, device)
     print("pipeline ready; generating page panels ...")

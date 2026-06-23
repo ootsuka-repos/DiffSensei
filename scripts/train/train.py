@@ -45,7 +45,7 @@ from src.models.resampler import Resampler
 from src.models.utils import load_ip_adapter, load_unet, load_ckpt, compute_ip_contrastive_loss, compute_ip_contrastive_loss_slow
 from src.datasets.utils import size_buckets
 from src.datasets.dataset_size_bucket import MangaTrainSizeBucketDataset, BucketBatchSampler, collate_fn
-from scripts.utils import print_gpu_memory_usage
+from scripts.train.utils import print_gpu_memory_usage
 
 
 logger = get_logger(__name__, log_level="INFO")
@@ -68,7 +68,7 @@ def launch_eval(config, config_path, log_dir, ckpt_path, tag):
     env["HF_HUB_OFFLINE"] = "1"; env["TRANSFORMERS_OFFLINE"] = "1"
     out_path = os.path.join(out_dir, f"{tag}.png")
     cmd = [
-        sys.executable, "-m", "scripts.demo.reproduce",
+        sys.executable, "-m", "scripts.eval.reproduce",
         "--config", config_path, "--ckpt", ckpt_path,
         "--ann", config.train_data.ann_path, "--image_root", config.train_data.image_root,
         "--out", out_path,

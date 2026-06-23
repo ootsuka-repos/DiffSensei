@@ -69,14 +69,16 @@ checkpoints
 **ステージ2（キャラ注入＋レイアウト制御）のみ**を学習する構成に絞り込んでいます
 （作画は WAI Illustrious ベースに任せ、ステージ1/3 の学習スクリプトは削除済み）。
 
-- データ準備（WAI変換 / 公開DiffSensei IP重み取得 / Magi自動アノテーション）
-- ステージ2 学習（`scripts/train/train.py` ＋ `self_finetune_wai_condition_5060ti.yaml`）
-- 推論（`DiffSenseiPipeline` を直接呼ぶ）
+- データ準備: `scripts/dataset/auto_annotate.py`、`scripts/train/prepare_*.py`
+- ステージ2 学習: `python -m scripts.train.train --config_path configs/train/diffsensei/self_finetune_wai_condition_5060ti.yaml`
+- 推論: `python -m scripts.inference.inference_trained`（単一パネル）
+- 評価: `python -m scripts.eval.reproduce`（学習データ GT vs 生成）
+- 参照画像: `python -m scripts.refs.gen_wai`（WAI 立ち絵）
 
-の具体的なコマンド・アーキテクチャ詳細・Windows 固有の注意点（マルチGPU不可・DataLoaderハング等）・
-16GB 最適化は、すべて **[CLAUDE.md](CLAUDE.md)** に集約しています。
+共有パイプライン構築は `src/inference/pipeline.py`。具体的なコマンド・アーキテクチャ詳細・
+Windows 固有の注意点・16GB 最適化は **[CLAUDE.md](CLAUDE.md)** に集約しています。
 
-> 上流オリジナルの推論（Gradio/CLI デモ）・MangaZero ダウンローダ・参考用ステージ1/3 学習コードは、
+> 上流オリジナルの Gradio デモ・MangaZero ダウンローダ・参考用ステージ1/3 学習コードは、
 > 本構成では不要なため削除しています。上流の完全な利用方法は
 > [本家リポジトリ](https://github.com/jianzongwu/DiffSensei) を参照してください。
 

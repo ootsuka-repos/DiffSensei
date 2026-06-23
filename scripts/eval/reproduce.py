@@ -1,17 +1,8 @@
 """
-Reproduce training-data panels with the EXACT training-time conditioning, to measure how
-close the model can reconstruct the data it was trained on.
-
-For one page of the annotation file, each panel (frame) is regenerated using the same inputs
-the dataset feeds during training:
-  - prompt      = frame["caption"]
-  - ip_bbox     = character bbox, made frame-relative & normalized (get_relative_bbox)
-  - ip_images   = self-conditioning: the character's own crop from the page
-  - dialog_bbox = dialog bbox, frame-relative & normalized
-The generated panel is placed next to the ground-truth panel crop for side-by-side comparison.
+Reproduce training-data panels with the exact training-time conditioning.
 
 Usage:
-    python -m scripts.demo.reproduce --config <cfg> --ckpt <epoch-N/ckpt.pth> \
+    python -m scripts.eval.reproduce --config <cfg> --ckpt <epoch-N/ckpt.pth> \
         --ann data/annotations/train.json --image_root data --page 80 --out outputs/repro.png
 """
 import os
@@ -28,18 +19,14 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 sys.path.insert(0, os.getcwd())
 
-from scripts.demo.inference_trained import build_pipeline
 from src.datasets.utils import get_relative_bbox
-
-
-def to8(v):
-    return max(256, min(512, (int(v) // 8) * 8))
+from src.inference import build_pipeline, frame_gen_size, infer_eval_dtype
 
 
 def main(args):
     cfg = OmegaConf.load(args.config)
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    wd = torch.float16 if device.startswith("cuda") else torch.float32
+    wd = infer_eval_dtype(cfg, device)
 
     ann = json.load(open(args.ann, encoding="utf-8"))
     if args.page is not None:
@@ -59,7 +46,7 @@ def main(args):
         if fw < 16 or fh < 16:
             continue
         gt = page_img.crop(tuple(fb))
-        gw, gh = to8(fw), to8(fh)
+        gw, gh = frame_gen_size(fw, fh, cfg, args.min_bucket_size)
 
         ip_images, ip_bbox = [], []
         for ch in fr["characters"][: cfg.model.max_num_ips]:
@@ -83,7 +70,7 @@ def main(args):
         row = Image.new("RGB", (g1.width + g2.width + 12, H), "white")
         row.paste(g1, (0, 0)); row.paste(g2, (g1.width + 12, 0))
         rows.append(row)
-        print(f"  panel {fi}: GT={gt.size} chars={len(ip_images)} dialogs={len(dialog_bbox)}")
+        print(f"  panel {fi}: gen={gw}x{gh} GT={gt.size} chars={len(ip_images)} dialogs={len(dialog_bbox)}")
 
     if not rows:
         raise SystemExit("no usable panels on this page")
@@ -108,6 +95,8 @@ if __name__ == "__main__":
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--steps", type=int, default=28)
     ap.add_argument("--ip_scale", type=float, default=0.7)
+    ap.add_argument("--min_bucket_size", type=int, default=None,
+                    help="eval bucket tier square side (default: eval.min_bucket_size or 1280)")
     ap.add_argument("--neg", type=str, default="colored, lowres, bad anatomy, worst quality, low quality")
     args = ap.parse_args()
     main(args)

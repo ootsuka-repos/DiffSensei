@@ -1,9 +1,8 @@
 """
 Generate character reference standing illustrations with WAI Illustrious SDXL (text2img).
-Plain SDXL — no DiffSensei modules. Useful for making clean IP reference images.
 
 Usage:
-    python -m scripts.demo.gen_wai --character "shigure ui (vtuber)" --n 5 --out outputs/ref_shigure
+    python -m scripts.refs.gen_wai --character "shigure ui (vtuber)" --n 5 --out outputs/ref_shigure
 """
 import os
 import sys

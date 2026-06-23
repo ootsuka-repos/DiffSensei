@@ -100,3 +100,5 @@ eval:
   page: 113                       # which annotation page to reproduce (fixed, for comparable progress); null = auto-pick
   steps: 28
   ip_scale: 0.7
+  min_bucket_size: 1280           # all eval panels use the 1280 tier (~SDXL high-res); aspect ratio preserved
+  # dtype: bf16                   # default = mixed_precision (bf16)
